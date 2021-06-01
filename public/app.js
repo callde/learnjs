@@ -48,6 +48,10 @@ learnjs.template = (name) => {
   return $('.templates .' + name).clone()
 }
 
+learnjs.landingView = () => {
+  return learnjs.template('landing-view')
+}
+
 learnjs.problemView = function(data) {
   var problemNumber = parseInt(data, 10)
   var view = $('.templates .problem-view').clone()
@@ -92,7 +96,9 @@ learnjs.problemView = function(data) {
 
 learnjs.showView = function(hash) {
   var routes = {
-    '#problem': learnjs.problemView
+    '#problem': learnjs.problemView,
+    '#': learnjs.landingView,
+    '': learnjs.landingView
   }
 
   var hashParts = hash.split('-')
