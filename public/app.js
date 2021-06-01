@@ -23,6 +23,10 @@ learnjs.applyObject = function(obj, elem) {
   }
 }
 
+learnjs.triggerEvent = (name, args) => {
+  $('.view-container>*').trigger(name, args)
+}
+
 learnjs.flashElement = (elem, content) => {
   elem.fadeOut('fast', () => {
     elem.html(content)
@@ -57,6 +61,16 @@ learnjs.problemView = function(data) {
   var view = $('.templates .problem-view').clone()
   var problemData = learnjs.problems[problemNumber - 1]
   var resultFlash = view.find('.result')
+
+  if(problemNumber < learnjs.problems.length) {
+    var buttonItem = learnjs.template('skip-btn')
+
+    buttonItem.find('a').attr('href', '#problem-' + (problemNumber + 1))
+    $('.nav-list').append(buttonItem)
+    view.bind('removingView', function() {
+      buttonItem.remove()
+    })
+  } 
   
   function checkAnswer() {
     var answer = view.find('.answer').val()
@@ -105,6 +119,7 @@ learnjs.showView = function(hash) {
   var viewFn = routes[hashParts[0]]
 
   if (viewFn) {
+    learnjs.triggerEvent('removingView', [])
     $('.view-container').empty().append(viewFn(hashParts[1]))
   }
 }
