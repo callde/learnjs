@@ -1,5 +1,9 @@
 "use strict";
 
+function googleSignIn() {
+  console.log(arguments)
+}
+
 var learnjs = {
      poolId: 'us-east-1:71958f90-67bf-4571-aa17-6e4c1dfcb67d'
 }; 
