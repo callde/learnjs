@@ -1,14 +1,153 @@
 "use strict";
 
-function googleSignIn() {
-  console.log(arguments)
+var learnjs = {
+  poolId: 'us-east-2:b8b113f0-d711-4dbf-84ba-7f2a19aa75f5'
+};
+
+learnjs.identity = new $.Deferred() 
+
+learnjs.awsRefresh = () => {
+  var deferred = new $.Deferred()
+
+  AWS.config.credentials.refresh(function(err) {
+    if(err) {
+      deferred.reject(err)
+    } else {
+      deferred.resolve(AWS.config.credentials.identityId)
+    }
+  })
+
+  return deferred.promise()
 }
 
-var learnjs = {
-     poolId: 'us-east-1:71958f90-67bf-4571-aa17-6e4c1dfcb67d'
-}; 
- 
-learnjs.identity = new $.Deferred(); 
+function googleSignIn(googleUser) {
+  const id_token = googleUser.getAuthResponse().id_token;
+
+  AWS.config.update({
+    region: 'us-east-2', 
+    credentials: new AWS.CognitoIdentityCredentials({
+      IdentityPoolId: learnjs.poolId,
+      Logins: {
+        'accounts.google.com': id_token
+      }
+    })
+  })
+
+  function refresh() {
+    return gapi.auth2.getAuthInstance().signIn({
+      prompt: 'login'
+    }).then(function(userUpdate) {
+      var creds = AWS.config.credentials;
+      var newToken = userUpdate.getAuthResponse().id_token;
+
+      creds.param.Logins['accounts.google.com'] = newToken;
+
+      return learnjs.awsRefresh()
+    })
+  }
+
+  learnjs.awsRefresh().then((id) =>  {
+    learnjs.identity.resolve({
+      id: id,
+      email: googleUser.getBasicProfile().getEmail(),
+      refresh: refresh
+    })
+  })
+}
+
+learnjs.sendDbRequest = (req, retry) => {
+  var promise = new $.Deferred()
+
+  req.on('error', (error) => {
+    if(error.code === "CredentialsError") {
+      learnjs.identity.then((identity) => {
+        return identity.refresh().then(() => {
+          return retry()
+        }, () => {
+          promise.reject(resp)
+        })
+      })
+    } else {
+      promise.reject(error)
+    }
+  })
+
+  req.on('success', (resp) => {
+    promise.resolve(resp.data)
+  })
+
+  req.send()
+
+  return promise
+}
+
+learnjs.saveAnswer = (problemId, answer) => {
+  return learnjs.identity.then((identity) => {
+    var db = new AWS.DynamoDB.DocumentClient()
+    var item = {
+      TableName: 'learnjs',
+      Item: {
+        userId: identity.id,
+        problemId: problemId,
+        answer: answer
+      }
+    }
+
+    return learnjs.sendDbRequest(db.put(item), () => {
+      return learnjs.saveAnswer(problemId, answer)
+    })
+  })
+}
+
+learnjs.fetchAnswer = (problemId) => {
+  return learnjs.identity.then((identity) => {
+    const db = new AWS.DynamoDB.DocumentClient()
+    var item = {
+      TableName: 'learnjs', 
+      Key: {
+        userId: identity.id,
+        problemId: problemId
+      }
+    }
+
+    return learnjs.sendDbRequest(db.get(item), () => {
+      return learnjs.fetchAnswer(problemId)
+    })
+  })
+}
+
+learnjs.countAnswers = (problemId) => {
+  return learnjs.identity.then((identity) => {
+    const db = new AWS.DynamoDB.DocumentClient()
+    const params = {
+      TableName: 'learnjs',
+      Select: 'COUNT',
+      FilterExpression: 'problemId = :problemId',
+      ExpressionAttributeValues: {':problemId': problemId}
+    }
+
+    return learnjs.sendDbRequest(db.scan(params), () => {
+      return learnjs.countAnswers(problemId)
+    })
+  })
+}
+
+learnjs.profileView = () =>  {
+  const view = learnjs.template('profile-view')
+
+  learnjs.identity.done((identity) => { 
+    view.find('.email').text(identity.email)
+  })
+
+  return view
+}
+
+learnjs.addProfileLink = (profile) => {
+  var link = learnjs.template('profile-link')
+
+  link.find('a').text(profile.email)
+  $('.signin-bar').prepend(link)
+}
 
 learnjs.problems = [
   {
@@ -83,12 +222,28 @@ learnjs.problemView = function(data) {
     return eval(test)
   }
 
-  function checkAnswerClick() {
+  /* function checkAnswerClick() {
     if(checkAnswer()) {
       var correctFlash = learnjs.template('correct-flash')
 
       correctFlash.find('a').attr('href', '#problem-' + (problemNumber + 1))
       learnjs.flashElement(resultFlash, correctFlash)
+    } else {
+      learnjs.flashElement(resultFlash, 'Incorrect!')
+    }
+
+    return false
+  } */
+
+  function checkAnswerClick() {
+    var answer = view.find('.answer').val()
+
+    if(checkAnswer()) {
+      const flashContent = learnjs.buildCorrectFlash(problemNumber)
+
+      learnjs.flashElement(resultFlash, flashContent)
+      // learnjs.saveAnswer(problemNumber, answer.val())
+      learnjs.saveAnswer(problemNumber, answer)
     } else {
       learnjs.flashElement(resultFlash, 'Incorrect!')
     }
@@ -100,6 +255,13 @@ learnjs.problemView = function(data) {
   view.find('.title').text('Problem #' + problemNumber)
 
   learnjs.applyObject(problemData, view)
+  learnjs.fetchAnswer(problemNumber).then((data) => {
+    var answer = view.find('.answer')
+
+    if(data.Item) {
+      answer.val(data.Item.answer)
+    }
+  })
 
   return view
 }
@@ -115,6 +277,7 @@ learnjs.problemView = function(data) {
 learnjs.showView = function(hash) {
   var routes = {
     '#problem': learnjs.problemView,
+    '#profile': learnjs.profileView,
     '#': learnjs.landingView,
     '': learnjs.landingView
   }
@@ -134,4 +297,5 @@ learnjs.appOnReady = () => {
   }
 
   learnjs.showView(window.location.hash)
+  learnjs.identity.done(learnjs.addProfileLink)
 }

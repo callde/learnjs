@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+# set -x
+
 abspath="$(cd "${0%/*}" 2>/dev/null; echo "$PWD"/"${0##*/}")"
 root_dir=`dirname "$abspath"`
 app_name=learnjs
